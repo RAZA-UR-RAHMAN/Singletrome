@@ -1,0 +1,151 @@
+---
+  title: "R Notebook"
+output:
+  html_document:
+  df_print: paged
+---
+## Libraries
+```{r results='hide', message=FALSE, warning=FALSE}
+require(ggplot2)
+require(Seurat)
+require(reshape2)
+library("ggpubr")
+library(car) # for scatterplot
+source("Analysis/Scripts/Pipeline_scripts/CustomTheme.R")
+source("Analysis/Scripts/Utility/FUNCTIONS.R")
+```
+
+
+## Variables and Directories
+```{r results='hide', message=FALSE, warning=FALSE}
+resultsDir="Results/"
+mappingDir=paste0(resultsDir,"/mapping_1/")
+filteredTranscriptsDir=paste0(resultsDir,"DOWNSTREAM/FILTERED_TRANSCRIPTS/")
+filteredTranscriptsForReadDistDir<-paste0(filteredTranscriptsDir,"/FILTERED_TRANSCRIPTS_READ_DISTRIBUTION/")
+if(!dir.exists(filteredTranscriptsForReadDistDir)){dir.create(filteredTranscriptsForReadDistDir,mode="0777",recursive = T)}
+#
+transcriptlengthTable<-read.table("Genomes/GTFDetails/transcriptAndGene.txt",sep="\t",header = T,row.names = 1)
+rangesDf<-read.table("Genomes/GTFDetails/transcriptRanges.txt",sep="\t",header = T)
+```
+## LOOP OVER ALL THE DATASETS
+```{r results='hide', message=FALSE, warning=FALSE}
+analysisConfigPath="Analysis/Configs/analysisConfig.txt" 
+analysisConfigTable=read.table(analysisConfigPath,sep="\t",header = T)
+#for(dsRow in 1:nrow(analysisConfigTable)){
+dsRow=3
+datasetID=analysisConfigTable[dsRow,"baseDir"]
+rseqQcDir=paste0(mappingDir,datasetID,"/UNTRIMMED/DOWNSTREAM/RSEQC/")
+filteredTranscriptsForReadDistDirPerDs=paste0(filteredTranscriptsForReadDistDir,datasetID,"/")
+singletromeObj=readRDS(paste0(filteredTranscriptsDir,"TRIM_UNTRIM_FILTER/",datasetID,"/Singletrome.RDS"))
+rowDf<-data.frame(datasetID=datasetID,Singletrome=nrow(singletromeObj))
+if(!dir.exists(filteredTranscriptsForReadDistDirPerDs)){dir.create(filteredTranscriptsForReadDistDirPerDs,mode="0777",recursive = T)}
+covPerTranscriptBodyWithLengthDF<-ObtainCovPerTranscriptBodyWithLengthDF(rseqQcDir,rangesDf,transcriptlengthTable,filteredTranscriptsForReadDistDirPerDs)
+```
+## Remove genes from singletrome if they do not have RSEQC, as we can not judge their quality. We want to include only quality filtered lncRNAs
+```{r}
+genesNotHavingRseqQC<-rownames(singletromeObj)[!(rownames(singletromeObj) %in% unique(covPerTranscriptBodyWithLengthDF$gene_id) | 
+                                                   (rownames(singletromeObj) %in% unique(covPerTranscriptBodyWithLengthDF$geneName)) |
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".1"))|
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".2"))|
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".3"))|
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".4"))|
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".5"))|
+                                                   (rownames(singletromeObj) %in% paste0(unique(covPerTranscriptBodyWithLengthDF$geneName),".6")))]
+write.table(file=paste0(filteredTranscriptsForReadDistDirPerDs,"genesNotHavingRseqQC.txt"),genesNotHavingRseqQC,sep="\t",col.names = NA,quote = F)
+# Remove from Singletrome
+'%!in%' <- function(x,y)!('%in%'(x,y))
+singletromeObj=singletromeObj[rownames(singletromeObj) %!in% genesNotHavingRseqQC,]
+rowDf<-cbind(rowDf,nGeneNotInRseqcQc=length(genesNotHavingRseqQC),SingletromeAfterNoRseqcGenesRemoved=nrow(singletromeObj))
+
+```
+### Subselect Rseqc matrix only to the genes which are part of the singletrome. Only to perform QC for those ones and plot only those ones
+#### Cellranger adds .1,.2 and so on to the gene names if they are duplicated.
+```{r}
+covPerTranscriptBodyWithLengthDF<-covPerTranscriptBodyWithLengthDF[which(covPerTranscriptBodyWithLengthDF$gene_id %in% rownames(singletromeObj)|
+                                                                           covPerTranscriptBodyWithLengthDF$geneName %in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".1") %in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".2") %in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".3")%in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".4") %in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".5") %in% rownames(singletromeObj)|
+                                                                           paste0(covPerTranscriptBodyWithLengthDF$geneName,".6")%in% rownames(singletromeObj)),]
+write.table(file=paste0(filteredTranscriptsForReadDistDirPerDs,"RSEQC_COVERAGE_MATRIX_ONLY_FOR_SINGLETROME_GENES.txt"),covPerTranscriptBodyWithLengthDF,sep="\t",col.names = NA,quote = F)
+rowDf<-cbind(rowDf,nGenesRseqc_Seurat=length(unique(covPerTranscriptBodyWithLengthDF$gene_id)))
+# STORE TO IDENTIFY THE GENES THAT WE WILL LOOSE IN THE STEPS (PEAK BIN and FIVE PRIME)
+IntialGenesInCovMatrixDf<-unique(covPerTranscriptBodyWithLengthDF[,c("gene_id","geneName")])
+```
+# Data loaded. Now MARK TRANSCRIPTS TO DELETE
+### Case 1. 5' Baised transcripts that have more than 50% expression in the 10th percentile of 5'
+```{r results='hide', message=FALSE, warning=FALSE}
+minTranscriptLengthToConsiderFor5PrimeHighExpression=1000
+fivePrimePercentilesToConsider=10
+coverageSumDf <- data.frame( x1 = apply(covPerTranscriptBodyWithLengthDF[,paste0("percent_",1:fivePrimePercentilesToConsider)], 1, sum) ,x2 = apply(covPerTranscriptBodyWithLengthDF[,paste0("percent_",(fivePrimePercentilesToConsider+1):100)], 1, sum),gene_id=covPerTranscriptBodyWithLengthDF$gene_id,geneName=covPerTranscriptBodyWithLengthDF$geneName,Transcript_Length=covPerTranscriptBodyWithLengthDF$Transcript_Length,type=covPerTranscriptBodyWithLengthDF$type)
+colnames(coverageSumDf)[1:2]<-c(paste0("percentile_1_",fivePrimePercentilesToConsider),paste0("percentile_",(fivePrimePercentilesToConsider+1),"_",100))
+coverageSumDf$FiveGreaterThanThreePrime <- ifelse(coverageSumDf[,1] >= (coverageSumDf[,2]), TRUE, FALSE)
+lncRNADf<-coverageSumDf[which(coverageSumDf$type=="lncRNA" & coverageSumDf$FiveGreaterThanThreePrime==TRUE & coverageSumDf$Transcript_Length>=minTranscriptLengthToConsiderFor5PrimeHighExpression),]
+#pcgDf<-coverageSumDf[which(coverageSumDf$type=="proteincoding" & coverageSumDf$FiveGreaterThanThreePrime==TRUE),]
+fileId=paste0("Transcripts_Five_Prime",fivePrimePercentilesToConsider,"_PERCENTILE")
+write.table(file=paste0(filteredTranscriptsForReadDistDirPerDs,fileId,".txt"),lncRNADf,sep="\t",col.names = NA,quote = F)
+```
+## ALSO CHECK IF ALL THE TRANSCRIPTS ARE MATKED TO BE DELETED
+```{r}
+deleteForFivePrimeDf<-checkIfAllExpressedTranscriptsAreMarked(lncRNADf,transcriptlengthTable,covPerTranscriptBodyWithLengthDF,filteredTranscriptsForReadDistDirPerDs,"Genes_Five_Prime")
+```
+#REMOVE FROM THE COVERAGE MATRIX BEFORE PLOTTING. COVERAGE_MATRIX_AFTER_5_PRIME IS USED TO PLOT THE READ DISTRIBUTION IN PLOTS_FOR_PAPER.R
+```{r}
+covPerTranscriptBodyWithLengthDF=removeTranscriptsFromCoverageMatrix(filteredTranscriptsForReadDistDirPerDs,"COVERAGE_MATRIX_AFTER_5_PRIME",covPerTranscriptBodyWithLengthDF,lncRNADf)
+IntialGenesInCovMatrixDf[which(IntialGenesInCovMatrixDf$gene_id %in% setdiff(IntialGenesInCovMatrixDf$gene_id,covPerTranscriptBodyWithLengthDF$gene_id)),"DeleteFivePrime"]="FivePrime"
+rowDf<-cbind(rowDf,fivePrimeTranscriptsDeleted=length(rownames(lncRNADf)),fivePrimeGenesDeleted=length(which(IntialGenesInCovMatrixDf$DeleteFivePrime=="FivePrime")),
+             FivePrimeAll=length(unique(lncRNADf$gene_id)),FivePrimeToDeleteBasedOnAllTranscripts=length(unique(deleteForFivePrimeDf[which(deleteForFivePrimeDf$delete==T),"gene_id"]))
+             ,FivePrimeFalse=length(unique(deleteForFivePrimeDf[which(deleteForFivePrimeDf$delete==F),"gene_id"])))
+```
+
+## Case 2. Transcripts that have more expression in one bin compared to all the rest of the bins
+### First calculate columns for later on filtering. maxbinExpression, maxbinNumberOfColumns, maxbinColumns (indices for crosschecking), sumOfResOfTheColumns
+
+```{r results='hide', message=FALSE, warning=FALSE}
+temp <- apply(covPerTranscriptBodyWithLengthDF[,1:100], 1, function(row){
+  x <- max(row)
+  y <-which(row==x)
+  z <- sum(row[-y])
+  c(x, length(y),paste0(y,collapse = ","), z)
+})
+covPerTranscriptBodyWithLengthDF$maxbinExpression <- as.numeric(temp[1,])
+covPerTranscriptBodyWithLengthDF$maxbinNumberOfColumns <- as.numeric(temp[2,])
+covPerTranscriptBodyWithLengthDF$maxbinColumnIndices <- temp[3,]
+covPerTranscriptBodyWithLengthDF$sumOfResOfTheColumns <-as.numeric(temp[4,])
+#####  Now filter
+numberOfBinsToConsiderForMax=1
+minTranscriptLengthToConsiderForMax=1000
+maxBinDF<-subset(covPerTranscriptBodyWithLengthDF, (Transcript_Length>=minTranscriptLengthToConsiderForMax & maxbinNumberOfColumns==1 & covPerTranscriptBodyWithLengthDF$maxbinExpression > covPerTranscriptBodyWithLengthDF$sumOfResOfTheColumns))
+# filter for lncRNAs
+filterGenesDf<-subset(maxBinDF,(maxbinColumnIndices<=90 & maxbinNumberOfColumns==1 & type=="lncRNA")) # only lncRNAs are to be filtered
+fileId=paste0("Transcripts_Peak_Bin",numberOfBinsToConsiderForMax,"_minTranscriptlen_",minTranscriptLengthToConsiderForMax)
+write.table(file=paste0(filteredTranscriptsForReadDistDirPerDs,fileId,".txt"),filterGenesDf,sep="\t",col.names = NA,quote = F)
+```
+## CHECK IF ALL THE TRANSCRIPTS OF A GENE ARE MARKED TO BE DELETED. 
+```{r}
+deleteForPeakBinDf<-checkIfAllExpressedTranscriptsAreMarked(filterGenesDf,transcriptlengthTable,covPerTranscriptBodyWithLengthDF,filteredTranscriptsForReadDistDirPerDs,"Genes_Peak_Bin")
+```
+#REMOVE FROM THE COVERAGE MATRIX BEFORE APPLYING THE NEXT STEP
+```{r}
+covPerTranscriptBodyWithLengthDF=removeTranscriptsFromCoverageMatrix(filteredTranscriptsForReadDistDirPerDs,"COVERAGE_MATRIX_AFTER_PEAK_BIN",covPerTranscriptBodyWithLengthDF,filterGenesDf)
+IntialGenesInCovMatrixDf[which(IntialGenesInCovMatrixDf$gene_id %in% setdiff(IntialGenesInCovMatrixDf$gene_id,covPerTranscriptBodyWithLengthDF$gene_id) & 
+                                 is.na(IntialGenesInCovMatrixDf$DeleteFivePrime)),"DeletePeakBin"]="PeakBin"
+rowDf<-cbind(rowDf,oneBinTranscriptsDeleted=length(rownames(filterGenesDf)),oneBinGenesDeleted=length(which(IntialGenesInCovMatrixDf$DeletePeakBin=="PeakBin")),oneBinAllGenes=length(unique(filterGenesDf$gene_id)),oneBinGenesToDeleteBasedOnAllTranscripts=length(unique(deleteForPeakBinDf[which(deleteForPeakBinDf$delete==T),"gene_id"])),oneBinGenesFalse=length(unique(deleteForPeakBinDf[which(deleteForPeakBinDf$delete==F),"gene_id"])))
+```
+
+## NOW FILTER FROM SINGLETROME
+```{r}
+# write qc filtered singletrome
+singletromeObj<-deleteGenesFromSingletromeBasedOnQc(IntialGenesInCovMatrixDf,singletromeObj)
+saveRDS(singletromeObj,file = paste0(filteredTranscriptsForReadDistDirPerDs,datasetID,"_QC_Filtered_Singletrome.RDS"))
+# write stats
+rowDf<-cbind(rowDf,SingletromeAfterQc=nrow(singletromeObj),RSEQCAfterQc=length(unique(covPerTranscriptBodyWithLengthDF$gene_id)))
+write.table(file=paste0(filteredTranscriptsForReadDistDirPerDs,"QC_STATS.txt"),t(rowDf),sep="\t",col.names = F,quote = F)
+print("------------------QC FILTERING COMPLETED------------------")
+```
+## Reperform PCA and UMAP and Differential Expression. May be deletion of the genes changes the outcome
+```{r}
+# I wrote a separate script Filtered_DownStream_Analysis.R to do this
+```
