@@ -1,0 +1,90 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+This Notebook is to perform clustering. Obtain the number of lncRNAs expressed in each genome.
+## Libraries
+```{r results='hide', message=FALSE, warning=FALSE}
+library(Seurat)
+library(tidyverse)
+library(scales)
+library(RCurl)
+library(cowplot)
+library(patchwork)
+
+set.seed(349870519)
+source("Utility/FUNCTIONS.R")
+```
+
+## Variables and Directories
+```{r}
+analysisConfigPath="Analysis/Configs/analysisConfig.txt" # to load summary files
+analysisConfigTable=read.table(analysisConfigPath,sep="\t",header = T)
+countConfigPath="Analysis/Configs/countConfig.txt"
+countConfigTable=read.table(countConfigPath,sep="\t",header = T)
+referenceNamesForID=c("TRIMMED","UNTRIMMED","GENCODE")
+resultsDir="Results/"
+mappingDir=paste0(resultsDir,"mapping_1/")
+clusteringDir=paste0(resultsDir,"DOWNSTREAM/CLUSTERING/")
+differentialExpressionDir=paste0(resultsDir,"DOWNSTREAM/DIFFERENTIAL_EXPRESSION/")
+if(!dir.exists(clusteringDir)){dir.create(clusteringDir,mode="0777",recursive = T)}
+if(!dir.exists(differentialExpressionDir)){dir.create(differentialExpressionDir,mode="0777",recursive = T)}
+
+```
+## Gene lists (protein coding and lncRNA genes)
+```{r}
+referenceResources="Genomes/reference_sources/"
+proteinCodingGenes=read.table(paste0(referenceResources,"protein_coding_genenames_and_ids_unique.txt"), quote = "",row.names=NULL,sep="\t")[[1]]
+singletromeLncRNAs=read.table(paste0(referenceResources,"Singletrome_genenames_and_ids_unique.txt"), quote = "",row.names=NULL,sep="\t")[[1]]
+GENCODELncRNAs=read.table(paste0(referenceResources,"GENECODE_lncRNA_genenames_and_ids_unique.txt"), quote = "",row.names=NULL,sep="\t")[[1]]
+
+# "LINC00595', 'LINC00856,LINC00856,LINC00595" added this manually. It is from lncExpDB
+# add .1 .2 and .3. Cellranger adds these if gene name is duplicated for different gene ids
+proteinCodingGenes=c(proteinCodingGenes,paste0(proteinCodingGenes,".1"),paste0(proteinCodingGenes,".2"),paste0(proteinCodingGenes,".3"),paste0(proteinCodingGenes,".4"))
+singletromeLncRNAs=c(singletromeLncRNAs,paste0(singletromeLncRNAs,".1"),paste0(singletromeLncRNAs,".2"),paste0(singletromeLncRNAs,".3"),paste0(singletromeLncRNAs,".4"),"LINC00595', 'LINC00856,LINC00856,LINC00595")
+GENCODELncRNAs=c(GENCODELncRNAs,paste0(GENCODELncRNAs,".1"),paste0(GENCODELncRNAs,".2"),paste0(GENCODELncRNAs,".3"))
+```
+
+## DATASET ANALYSIS
+```{r message=FALSE, warning=FALSE}
+for(dsRow in 1:nrow(analysisConfigTable)){
+  datasetID=analysisConfigTable[dsRow,"baseDir"]
+  metaDataFile=analysisConfigTable[dsRow,"metaData"]
+  for(referenceName in referenceNamesForID){
+    print(paste0("Running for ",datasetID," ",referenceName))
+    currentOutDir<-paste0(clusteringDir,datasetID,"/",referenceName,"/")
+    dir.create(currentOutDir,mode = "0777",recursive = T)
+    samples=as.character(countConfigTable[which(countConfigTable$baseDir==datasetID),"id"])
+    seuratObj=loadSeuratObjectsFromCellRanger(samples,datasetID,referenceName)
+    # add metadata
+    metaData=read.table(metaDataFile,sep="\t",header = T,row.names = 1)
+    seuratObj <- AddMetaData(object = seuratObj, metadata = metaData)
+    '%!in%' <- function(x,y)!('%in%'(x,y))
+  cellsNotFoundInOurAnalysis=rownames(metaData)[which(rownames(metaData) %!in% rownames(seuratObj@meta.data))]
+  cellsNotFoundInAnnotation=rownames(seuratObj@meta.data)[which(rownames(seuratObj@meta.data) %!in% rownames(metaData))]
+  cellsToRemove=rownames(seuratObj@meta.data)[which(is.na(seuratObj@meta.data$celltype))]
+  row=c(datasetID=datasetID,Genome=referenceName,noOfCellsInAnnotation=nrow(metaData),noOfCellsInOurAnalysis=nrow(seuratObj@meta.data),cellsNotFoundInOurAnalysis=length(cellsNotFoundInOurAnalysis),cellsNotFoundInAnnotation=length(cellsNotFoundInAnnotation),cellsToRemove=length(cellsToRemove))
+  seuratObj <- seuratObj[,!colnames(seuratObj) %in% cellsToRemove]
+  # Now we might have retained genes that were expressed only in the removed cells. We need to remove those genes
+  Keep_genes <- Matrix::rowSums(GetAssayData(object = seuratObj, slot = "counts")) >= 1
+  Keep_genes_True=Keep_genes[which(Keep_genes==TRUE)]
+  seuratObj <- subset(seuratObj, features = names(Keep_genes_True))
+  write.table(file=paste0(currentOutDir,"stats.txt"),row,quote = F,col.names = F,sep="\t")
+  # choose lncRNA list to split
+  lncRNAs=singletromeLncRNAs
+  if(referenceName=="GENCODE"){
+    lncRNAs=GENCODELncRNAs
+    }
+  print(paste0("Loaded lncRNAs ", length(lncRNAs)))
+  proteinSeuratObj <- subset(seuratObj, features = proteinCodingGenes)
+  lncRNASeuratObj <- subset(seuratObj, features = lncRNAs)
+  PerformDownStreamAnalysis(seuratObj,currentOutDir,"COMBINED")
+  PerformDownStreamAnalysis(proteinSeuratObj,currentOutDir,"PROTEINCODING")
+  PerformDownStreamAnalysis(lncRNASeuratObj,currentOutDir,"LNCRNA")
+  
+  }# end of reference loop
+}# end of dataset loop
+```
