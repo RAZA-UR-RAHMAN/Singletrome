@@ -14,7 +14,27 @@ GtfProcessor.ipynb contains all the code and functions to read and write a GTF f
 The scripts in the ANALYSIS_PIPELINES were used to perform analysis and create plots such as CellrangerCompiler.Rmd to compile and compare the mapping stats produced by the cellranger, Expression_Comparison_and_Filtering.Rmd to filter lncRNAs by comparing the expression of lncRNAs in TLGA and ULGA, Read_Distribution_Filtering.Rmd filter lncRNAs by assessing the read distribution across the transcripts, SeuratPipeline.Rmd contains the analysis of protein-coding and lncRNA genes across different genome annotations and Filtered_DownStream_Analysis.R to perform clustering and differential expression of the lncRNAs that passed the quality control filter. The geneBody_coverage_modified.py is the modified script form RSEQC to report the coverage for each transcript before normalizing to 1.  CustomTheme.R is the theme that is used to plot figures.
 
 #### Utility
-The Utility directory contains FUNCTIONS.R which has the functions to perform analysis. This script is used by many other scripts and contain FUNCTIONS that are called by other scripts.
+The Utility directory contains FUNCTIONS.R which has the functions to perform analysis. This script is used by many other scripts and contain FUNCTIONS that are utilized by other scripts.
 
 #### Machine_Learning
-The Machine_Learning directory contains scripts that were used to convert the Seurat objects into matrix form for cell type and disease prediction. The directory also includes the code to split data into training and testing sets as well as all the models for cell type and disease prediction. 
+The Machine_Learning directory contains scripts that were used to convert the Seurat objects into matrix form for cell type and disease prediction. The directory also includes the code to split data into training and testing sets as well as all the models for cell type and disease prediction.
+
+##### Create_Matrices_For_ML.R 
+Creates two matrices from Seurat Object, (i) 'Matrix.csv' that contains the counts and (ii) 'metadata.csv' that contains the metadata for the counts. This metadata contains additional information and the cell type or disease annotation for machine learning prediction. 
+
+##### The script PreProcessing.ipynb
+<ul>
+<li>Takes two files (matrices) as input, (i) 'Matrix.csv' that contains the counts and (ii) 'metadata.csv'  that contains the metadata for the counts.</li>
+<li>Merge these two files (matrices) based on the cell bar code.</li>
+<li>Identify the columns where all values are zero.</li>
+<li>Delete the columns with zero values.</li>
+<li>Create Dummy Variables for the outcome variables such as Cell Type or Disease.</li>
+<li>Saves the resultant data frame to CSV.</li>
+<li>The output CSV is used as input for XGBoost Classifier to predict cell type or disease.</li>
+</ul>
+
+##### CellType-Prediction-Classifier.ipynb
+<li> XGBoost classifier to predict cell types.</li>
+
+##### Disease-Prediction-Classifier.ipynb
+<li>XGBoost classifier to predict disease.</li>
