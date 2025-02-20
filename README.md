@@ -2,39 +2,136 @@
 
 Singletrome, is an enhanced human lncRNA genome annotation for scRNA-seq analysis, by merging protein-coding and lncRNA databases with additional filters for quality control. Using Singletrome, we were able to cluster cell types based solely on lncRNAs expression, providing evidence of the depth and diversity of lncRNA reads contained in scRNA-seq data. Our analysis identified lncRNAs differentially expressed in specific cell types with development of liver fibrosis. Importantly, lncRNAs alone were able to predict cell types and human disease pathology through the application of machine learning. This comprehensive annotation will allow mapping of lncRNA expression across cell types of the human body facilitating the development of an atlas of human lncRNAs in health and disease. 
 
-### The scripts for creating Singletrome and for processing single cell RNA-Seq 10X Genomics Data are uploaded and explained below.
+## Overview
+This repository provides a collection of scripts designed for single-cell RNA sequencing (scRNA-seq) analysis, with a focus on incorporating long noncoding RNAs (lncRNAs) into transcriptomic studies. The toolkit includes scripts for generating enhanced genome annotations, creating BED files, and running Cell Ranger for scRNA-seq processing and visualization.
 
-#### Genome_scripts 
-The scripts in the Genome_scripts were used to download the genome fasta files, genome annotation from GENCODE and LncExpDB, scripts to build genome indices and create BED file format for comparing protein-coding and lncRNA genes as well as to perform RSEQC analysis. The gene_and_transcript_length_analysis.R has the code to perform correlation analysis of gene and transcript length for both protein-coding genes and lncRNA genes.
 
-#### GTF_Processesing 
-GtfProcessor.ipynb contains all the code and functions to read and write a GTF file with Genes, Transcripts and Exons. create_ULGA_and_TLGA_gtfs.ipynb contains all the code to create TLGA and ULGA genome annotations. This notebook deletes lncRNA genes that overlap protein-coding genes on the same strand and trim lncRNA exons that overlap protein-coding genes on the opposite strand.
 
-#### ANALYSIS_PIPELINES 
-The scripts in the ANALYSIS_PIPELINES were used to perform analysis and create plots such as CellrangerCompiler.Rmd to compile and compare the mapping stats produced by the cellranger, Expression_Comparison_and_Filtering.Rmd to filter lncRNAs by comparing the expression of lncRNAs in TLGA and ULGA, Read_Distribution_Filtering.Rmd filter lncRNAs by assessing the read distribution across the transcripts, SeuratPipeline.Rmd contains the analysis of protein-coding and lncRNA genes across different genome annotations and Filtered_DownStream_Analysis.R to perform clustering and differential expression of the lncRNAs that passed the quality control filter. The geneBody_coverage_modified.py is the modified script form RSEQC to report the coverage for each transcript before normalizing to 1.  CustomTheme.R is the theme that is used to plot figures.
+## Installation and Dependencies
+1. Ensure you have [Apptainer](https://apptainer.org/) installed.
+2. Download the prebuilt SIF container or rebuild it using `build.apptainer`.
+---
+## Prerequisites
 
-#### Utility
-The Utility directory contains FUNCTIONS.R which has the functions to perform analysis. This script is used by many other scripts and contain FUNCTIONS that are utilized by other scripts.
+The toolkit requires [Apptainer](https://apptainer.org/) to run the provided containerized environment.
 
-#### Machine_Learning
-The Machine_Learning directory contains scripts that were used to convert the Seurat objects into matrix form for cell type and disease prediction. The directory also includes the code to split data into training and testing sets as well as all the models for cell type and disease prediction.
+A prebuilt SIF container is available for [download](https://www.dropbox.com/scl/fi/oy2b68i3j2vxg9rhi8ghp/singletrome_apptainer_cellranger602.sif?rlkey=qirzit6khced16svn4pdqk1md&st=h8wdx66r&dl=0).
 
-##### Create_Matrices_For_ML.R 
-Creates two matrices from Seurat Object, (i) 'Matrix.csv' that contains the counts and (ii) 'metadata.csv' that contains the metadata for the counts. This metadata contains additional information and the cell type or disease annotation for machine learning prediction. 
+### Download the Prebuilt SIF Container
+You can download the prebuilt Apptainer container from the following link: [[Dropbox](https://www.dropbox.com/scl/fi/oy2b68i3j2vxg9rhi8ghp/singletrome_apptainer_cellranger602.sif?rlkey=qirzit6khced16svn4pdqk1md&st=h8wdx66r&dl=0)]
 
-##### The script PreProcessing.ipynb
-<ul>
-<li>Takes two files (matrices) as input, (i) 'Matrix.csv' that contains the counts and (ii) 'metadata.csv'  that contains the metadata for the counts.</li>
-<li>Merge these two files (matrices) based on the cell bar code.</li>
-<li>Identify the columns where all values are zero.</li>
-<li>Delete the columns with zero values.</li>
-<li>Create Dummy Variables for the outcome variables such as Cell Type or Disease.</li>
-<li>Saves the resultant data frame to CSV.</li>
-<li>The output CSV is used as input for XGBoost Classifier to predict cell type or disease.</li>
-</ul>
+If you need to rebuild the image, use the `build.apptainer` script and refer to the LSF submission example in `Apptainer.lsf`.
 
-##### CellType-Prediction-Classifier.ipynb
-<li> XGBoost classifier to predict cell types.</li>
+---
 
-##### Disease-Prediction-Classifier.ipynb
-<li>XGBoost classifier to predict disease.</li>
+
+## Scripts and Usage
+
+### 1. `Singletrome.py`: Generate Singletrome GTF
+`Singletrome.py` generates the Singletrome GTF, an enhanced human lncRNA genome annotation for scRNA-seq analysis.
+
+#### Usage:
+```bash
+python Singletrome.py --help
+```
+
+#### Options:
+```
+-h, --help            Show this help message and exit.
+-v, --version         Show program's version number and exit.
+-lncbook_path, --pathToLncBook
+                        Path to the LncExpDB GTF file containing lncRNAs.
+                        Default: ftp://download.big.ac.cn/lncexpdb/0-ReferenceGeneModel/1-GTFFiles/LncExpDB_OnlyLnc.tar.gz
+-gencode_path, --pathToGencode
+                        Path to the Gencode GTF file containing gene (protein coding as well as lncRNAs) annotations.
+                        Default: http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_32/gencode.v32.primary_assembly.annotation.gtf.gz
+-o, --output_dir      Directory to save output files. Default: ./Singletrome_output
+-m, --mkref          Flag to indicate whether to create a cellranger reference genome. Use T (True) or F (False). Default: F
+-fasta_path, --pathToFasta
+                        Path to the reference genome FASTA file, required if `mkref` is set to T.
+                        Default: https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz
+```
+
+---
+
+### 2. `run_cellranger.py`: Run Cell Ranger and generate merged BAM and BigWig files for visualization
+This script facilitates running Cell Ranger, merging BAM files for RSeQC, and creating BigWig for visualizations.
+
+#### Usage:
+```bash
+python run_cellranger.py <input_file> <transcriptome_path> [--localcores=<cores>] [--localmem=<memory>] [--create-bam=<true|false>]
+```
+
+#### Options:
+- `<input_file>`: Path to input FASTQ files.
+- `<transcriptome_path>`: Path to the reference transcriptome.
+- `--localcores`: Number of cores to use (optional).
+- `--localmem`: Amount of memory to allocate (optional).
+- `--create-bam`: Whether to create BAM files (`true` or `false`).
+
+---
+
+### 3. `CreateBedFilesForGTF.py`: Convert GTF to BED
+This script converts a GTF file to a BED12 format by first converting to GenePred and then to BED12.
+
+#### Usage:
+```bash
+python CreateBedFilesForGTF.py --pathToGTF <GTF_FILE> --outDir <OUTPUT_DIR>
+```
+
+#### Options:
+```
+-h, --help            Show this help message and exit.
+--pathToGTF           Path to the input GTF file.
+--outDir              Directory to store output files.
+```
+
+---
+
+## ANALYSIS_PIPELINES
+The scripts in the ANALYSIS_PIPELINES directory were used to perform analysis and create plots, including:
+- `CellrangerCompiler.Rmd`: Compiles and compares mapping stats produced by Cell Ranger.
+- `Expression_Comparison_and_Filtering.Rmd`: Filters lncRNAs by comparing expression in TLGA and ULGA.
+- `Read_Distribution_Filtering.Rmd`: Filters lncRNAs by assessing read distribution across transcripts.
+- `SeuratPipeline.Rmd`: Analyzes protein-coding and lncRNA genes across different genome annotations.
+- `Filtered_DownStream_Analysis.R`: Performs clustering and differential expression analysis of lncRNAs passing QC filters.
+- `geneBody_coverage_modified.py`: A modified RSeQC script reporting coverage for each transcript before normalization.
+- `CustomTheme.R`: Custom theme used for plotting figures.
+
+---
+
+## Utility
+The `Utility` directory contains `FUNCTIONS.R`, which includes reusable functions for analysis. This script is used by multiple other scripts in the repository.
+
+---
+
+## Machine_Learning
+The `Machine_Learning` directory contains scripts for converting Seurat objects into matrix form for cell type and disease prediction. It includes code to split data into training/testing sets and models for classification.
+
+### `Create_Matrices_For_ML.R`
+- Creates two matrices from Seurat Object:
+  1. `Matrix.csv`: Contains expression counts.
+  2. `metadata.csv`: Contains metadata, including cell type or disease annotations.
+
+### `PreProcessing.ipynb`
+- Takes `Matrix.csv` and `metadata.csv` as input.
+- Merges them based on cell barcode.
+- Identifies and removes columns with all zero values.
+- Creates dummy variables for outcome variables (Cell Type/Disease).
+- Saves the resultant dataframe as CSV for XGBoost classifier input.
+
+### `CellType-Prediction-Classifier.ipynb`
+- Uses XGBoost classifier to predict cell types.
+
+### `Disease-Prediction-Classifier.ipynb`
+- Uses XGBoost classifier to predict diseases.
+
+
+---
+
+## Citation
+
+If you use this toolkit in your research, please cite:
+Rahman, R., Ahmad, I., Sparks, R., Ben Saad, A., & Mullen, A. (2022). [Singletrome: A method to analyze and enhance the transcriptome with long noncoding RNAs for single cell analysis]. bioRxiv. https://doi.org/10.1101/2022.10.31.514182
+---
+
