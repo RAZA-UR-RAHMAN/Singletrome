@@ -1,0 +1,13 @@
+#! /bin/bash
+
+#BSUB -L /bin/bash
+#BSUB -q large
+#BSUB -n 20 -W 48:00
+#BSUB -J Apptainer
+#BSUB -o Apptainer.out
+#BSUB -e Apptainer.err
+#BSUB -R span[hosts=1]
+#BSUB -R rusage[mem=20G]
+
+module load apptainer/1.3.5
+apptainer build singletrome.sif build.apptainer
