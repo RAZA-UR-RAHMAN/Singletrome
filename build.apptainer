@@ -1,0 +1,80 @@
+Bootstrap: docker
+From: centos:7.6.1810
+
+%test
+    echo "hello world"
+
+%environment
+    export PATH=/opt/bin:$PATH
+    __conda_setup="$('/opt/software/conda/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+    if [ $? -eq 0 ]; then
+        eval "$__conda_setup"
+    else
+        if [ -f "/opt/software/conda/etc/profile.d/conda.sh" ]; then
+            . "/opt/software/conda/etc/profile.d/conda.sh"
+        else
+            export PATH=$PATH:/opt/software/conda/bin:/opt/software/conda/condabin
+        fi
+    fi
+    unset __conda_setup
+    conda activate /opt/software/singletrome
+
+%files
+    /home/zixiu.li-umw/Singletrome/geneBody_coverage_byRaza.py /opt/geneBody_coverage_byRaza.py
+
+%post
+    # Set up directories
+    mkdir -p /opt/bin /opt/software
+
+    # Add a custom `which` script
+    cat << 'EOF' > /opt/bin/which
+#!/bin/bash
+for cmd in "$@"; do
+ found=$(command -v "$cmd")
+ if [ -n "$found" ]; then
+     echo "$found"
+ else
+     echo "$cmd not found" >&2
+ fi
+done
+EOF
+    chmod +x /opt/bin/which
+
+    # Install Miniconda
+    cd /opt/software
+    curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    sh ./Miniconda3-latest-Linux-x86_64.sh -p /opt/software/conda -b
+
+    # Configure Conda
+    __conda_setup="$('/opt/software/conda/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+    if [ $? -eq 0 ]; then
+        eval "$__conda_setup"
+    else
+        if [ -f "/opt/software/conda/etc/profile.d/conda.sh" ]; then
+            . "/opt/software/conda/etc/profile.d/conda.sh"
+        else
+            export PATH=$PATH:/opt/software/conda/bin/:/opt/software/conda/condabin
+        fi
+    fi
+    unset __conda_setup
+    /opt/software/conda/bin/conda config --add channels defaults
+    /opt/software/conda/bin/conda config --add channels conda-forge
+    /opt/software/conda/bin/conda config --add channels bioconda
+    /opt/software/conda/bin/conda install -y -c conda-forge mamba
+    /opt/software/conda/bin/mamba create -p /opt/software/singletrome -y "python==3.10"
+    conda activate /opt/software/singletrome
+    mamba install -c bioconda bedtools==2.28.0 numpy pandas
+
+    # Download and extract Cell Ranger
+    curl -o cellranger-6.0.2.tar.gz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-6.0.2.tar.gz?Expires=1737695652&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=DeqtaChXNeyOJiCjN9xYP50HAlNl89eAnV2uu5AxbPU4-LF8ln~QmrKNhZcFZ7QR8yPoyY4nXFzeaBT9RwPr4cFoZcGyVGUnBVZjJTSjVOwmW-gNFBak96c8~HRAG8NwNXz6Y42C29dKIFnDsS3jXxOymrTVnUJEJaprgjOH6NFchU2BcWux8AZA1S~8wr9mTo5-o0ffGwbJk4doUQeVew2XQq2VRY~8QrjGbPt9d47TAhNIo1FpabWgrDMfpW785Bg6hAySAevK75leq7xYzQN5DZryMQ7h6ScZsf48-xtjd1~gyhpvVTGpRnU-~-Im9wY0aocDGWnr~SNw4Y9gng__"    
+    tar xf cellranger-6.0.2.tar.gz
+
+    # Install additional tools
+    mamba install -c bioconda rseqc
+    mamba install -c bioconda ucsc-gtftogenepred
+    mamba install -c bioconda samtools
+    mamba install -c bioconda deeptools
+
+    mv /opt/geneBody_coverage_byRaza.py /opt/software/conda/pkgs/rseqc-5.0.4-pyhdfd78af_0/python-scripts/geneBody_coverage.py
+%runscript
+    exec ${binary} "$@"
