@@ -43,7 +43,7 @@ python Singletrome.py --help
                         Path to the LncExpDB GTF file containing lncRNAs.
                         Default: ftp://download.big.ac.cn/lncexpdb/0-ReferenceGeneModel/1-GTFFiles/LncExpDB_OnlyLnc.tar.gz
 -gencode_path, --pathToGencode
-                        Path to the Gencode GTF file containing gene (protein coding as well as lncRNAs) annotations.
+                        Path to the Gencode GTF file containing gene annotations.
                         Default: http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_32/gencode.v32.primary_assembly.annotation.gtf.gz
 -o, --output_dir      Directory to save output files. Default: ./Singletrome_output
 -m, --mkref          Flag to indicate whether to create a cellranger reference genome. Use T (True) or F (False). Default: F
